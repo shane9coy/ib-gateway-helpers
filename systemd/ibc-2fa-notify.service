@@ -1,0 +1,12 @@
+[Unit]
+Description=Watch IB Gateway log and Telegram-notify on 2FA prompt
+After=ibgateway.service
+
+[Service]
+Type=simple
+ExecStart=/home/USER/ibc/notify_2fa_watch.sh
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

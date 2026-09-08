@@ -1,0 +1,37 @@
+# Example IB Gateway jts.ini
+# Copy to /opt/ibgateway/jts.ini (or wherever IB Gateway lives) and edit.
+# Do not commit this file with real credentials — see /opt/ibgateway/.install4j/response.varfile
+# for the credentials storage convention.
+
+[IBGateway]
+WriteDebug=false
+# TrustedIPs must include 127.0.0.1 or local API clients can't connect.
+TrustedIPs=127.0.0.1
+# Point at cdc1 (the secondary CCp gateway) if your network blocks ndc1.
+# See docs/IBGATEWAY_PORT_REDIRECT.md for rationale.
+RemoteHostOrderRouting=cdc1.ibllc.com
+RemotePortOrderRouting=4001
+LocalServerPort=4000
+# ApiOnly=true: run without the trading UI, only the API server.
+ApiOnly=true
+
+[Logon]
+useRemoteSettings=false
+UserNameToDirectory=ohamllgdbibgdlldighlgephppdjejafalnogaed,haoophaiahcedfllmpeohhflpioamiceimgiebmi
+TimeZone=America/New_York
+tradingMode=l
+colorPalletName=dark
+Steps=11
+Locale=en
+# SupportsSSL line is updated by IB Gateway itself on each login.
+SupportsSSL=cdc1.ibllc.com:4000,true,20260101,false
+UseSSL=true
+s3store=true
+displayedproxymsg=1
+ibkrBranding=pro
+
+[Communication]
+# The Peer is what the IB Gateway API server binds to for client connections.
+# For live trading, this is port 4001.
+Peer=cdc1.ibllc.com:4001
+Region=usr
