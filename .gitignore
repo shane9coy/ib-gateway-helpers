@@ -1,0 +1,25 @@
+# Local configs / logs / secrets — never commit
+*.log
+*~
+config.ini.local
+jts.ini
+jts.ini.local
+credentials.env
+.env
+
+# Editor / OS scratch
+.DS_Store
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Build artifacts
+dist/
+build/
+*.egg-info/

@@ -1,0 +1,35 @@
+[Unit]
+Description=Interactive Brokers Gateway (paper) via IBC + Xvfb
+Documentation=https://github.com/IbcAlpha/IBC
+After=network-online.target nss-lookup.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=qp
+Group=qp
+WorkingDirectory=/home/USER/ibc
+Environment="JAVA_HOME=/opt/bellsoft-jdk21"
+Environment="PATH=/opt/bellsoft-jdk21/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="JAVA_PATH=/opt/bellsoft-jdk21"
+Environment="APP=GATEWAY"
+Environment="TWS_MAJOR_VRSN=1045"
+Environment="IBC_PATH=/opt/ibc"
+Environment="IBC_VRSN=3.24.2"
+Environment="TWS_PATH=/opt/ibgateway"
+Environment="TWS_SETTINGS_PATH=/opt/ibgateway"
+Environment="IBC_INI=/home/USER/ibc/config.ini"
+Environment="LOG_PATH=/home/USER/ibc/logs"
+Environment="TWOFA_TIMEOUT_ACTION=exit"
+Environment="DISPLAY=:99"
+ExecStart=/home/USER/ibc/run_xvfb_gateway.sh
+Restart=on-failure
+RestartSec=300
+StartLimitBurst=4
+StartLimitIntervalSec=3600
+StandardOutput=append:/home/USER/ibc/logs/ibc.log
+StandardError=append:/home/USER/ibc/logs/ibc.log
+TimeoutStartSec=300
+
+[Install]
+WantedBy=default.target
