@@ -211,15 +211,25 @@ exec /opt/ibc/scripts/displaybannerandlaunch.sh
 WRAPPER
 chmod +x "$IBC_HOME/run_xvfb_gateway.sh"
 
+# The systemd units reference these by absolute path in ~/ibc/.
+for s in notify_2fa_watch.sh notify_2fa_needed.sh notify_gateway_down.sh notify_weekly_reauth.sh; do
+  cp "$SCRIPT_DIR/scripts/$s" "$IBC_HOME/$s" && chmod +x "$IBC_HOME/$s"
+done
+
 ok "~/ibc/ staged (credentials in credentials.env, mode 0600)"
 
 # ── Step 9: Install + start systemd units ──────────────────────────────────
 log "Step 9/9: installing systemd units"
 mkdir -p "$USER_HOME/.config/systemd/user"
-for s in "$SCRIPT_DIR/systemd/"*.service; do
+for s in "$SCRIPT_DIR/systemd/"*.service "$SCRIPT_DIR/systemd/"*.timer; do
   sed "s|/home/USER|$USER_HOME|g; s|User=qp|User=$USER_NAME|g" "$s" \
     > "$USER_HOME/.config/systemd/user/$(basename "$s")"
 done
+
+# Open the trading week before the first start: ibgateway.service is gated on
+# ~/ibc/.trading-week, which ibc-weekly-reauth creates each Sunday and
+# ibgw-stop removes each Friday.
+touch "$IBC_HOME/.trading-week"
 
 # Telegram .env (optional)
 if [[ -n "${IBGW_TELEGRAM_BOT_TOKEN:-}" && -n "${IBGW_TELEGRAM_CHAT_ID:-}" ]]; then
@@ -234,8 +244,9 @@ fi
 
 # Reload systemd (use --user; fall back to system if user bus not available)
 if systemctl --user daemon-reload 2>/dev/null; then
-  systemctl --user enable --now ibgateway.service ibc-2fa-notify.service 2>&1 | tail -3
-  ok "user services enabled and started"
+  systemctl --user enable --now ibgateway.service ibc-2fa-notify.service \
+    ibc-weekly-reauth.timer ibgw-stop.timer 2>&1 | tail -3
+  ok "user services and trading-week timers enabled and started"
 else
   warn "user systemd bus unavailable — start manually with:"
   echo "  $IBC_HOME/run_xvfb_gateway.sh"
@@ -246,6 +257,7 @@ echo
 ok "INSTALL COMPLETE"
 echo
 echo "  IB Gateway:    systemctl --user status ibgateway.service"
+echo "  Week window:   ~/ibc/.trading-week (Sun 12:00 ibc-weekly-reauth, Fri 20:00 ibgw-stop)"
 echo "  API port:      127.0.0.1:4001 (live) or 4002 (paper)"
 echo "  VNC:           localhost:5999 (run x11vnc -display :99 -rfbport 5999 if not auto-started)"
 echo "  2FA injector:  inject_sms.py --confirm <6-digit-code>"

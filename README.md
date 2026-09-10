@@ -23,15 +23,17 @@ within the first hour:
    uses the official `ibapi` package — `ib_insync` (the popular wrapper)
    has a known incompatibility with IB Gateway where no events fire after
    `connect()`. See [`docs/IBAPI_VS_IBINSYNC.md`](docs/IBAPI_VS_IBINSYNC.md).
-3. **Notification when the gateway is stuck at the 2FA prompt.**
-   `notify_2fa_watch.sh` tails the IBC log and pings you on Telegram the
-   moment the SMS dialog opens.
+3. **Notification when the gateway is stuck at 2FA.** `notify_2fa_watch.sh`
+   tails the IBC log and pings you on Telegram the moment a second-factor
+   prompt opens — app-auth push *or* SMS dialog.
 
 Also included:
 
 - A patched `commandsend.sh` (the upstream one uses `telnet`, which
   isn't installed on most modern Linux distros).
-- Sample `systemd` units that survive Gateway crashes and re-prompt for 2FA.
+- Sample `systemd` units that survive Gateway crashes and re-prompt for 2FA,
+  plus the trading-week lifecycle (Sunday re-auth reminder, Friday stop,
+  gateway-down alert). See [Trading-week lifecycle](#trading-week-lifecycle).
 - Working examples of `IBC config.ini` and `IB Gateway jts.ini`.
 
 What's **not** included: the IB Gateway binary (proprietary; download
@@ -74,12 +76,13 @@ The install script will:
 4. Download IBC and IB Gateway into `/opt/ibc` and `/opt/ibgateway`
    (skipped if already present).
 5. Copy scripts to `/usr/local/bin/`.
-6. Stage `~/ibc/` with `config.ini`, `credentials.env`, and the
-   `run_xvfb_gateway.sh` wrapper, **without** ever committing the
-   password to git.
+6. Stage `~/ibc/` with `config.ini`, `credentials.env`, the
+   `run_xvfb_gateway.sh` wrapper and the notifier scripts, **without**
+   ever committing the password to git.
 7. Patch `jts.ini` to point at `cdc1.ibllc.com` (the secondary CCp
    gateway, in case the default `ndc1` is firewalled on this network).
-8. Install the two systemd units and start them.
+8. Install the systemd units and timers, open the trading week, and
+   start them.
 9. Print the VNC address, the API port, and the verification command.
 
 If anything goes wrong, the script exits non-zero at the failing step.
@@ -98,14 +101,23 @@ pip3 install --user ibapi
 
 # 3. Copy scripts
 sudo cp scripts/* /usr/local/bin/
-sudo chmod +x /usr/local/bin/{inject_sms.py,verify_after_auth.py,probe_handshake.py,diag_api.py,enable_api.sh,notify_2fa_watch.sh,notify_2fa_needed.sh,commandsend.sh}
+sudo chmod +x /usr/local/bin/{inject_sms.py,verify_after_auth.py,probe_handshake.py,diag_api.py,enable_api.sh,notify_2fa_watch.sh,notify_2fa_needed.sh,notify_gateway_down.sh,notify_weekly_reauth.sh,commandsend.sh}
 
-# 4. (Optional) Install systemd units
+# 3b. The systemd units reference the notifier scripts by absolute path in
+#     ~/ibc/, so stage them there too.
+mkdir -p ~/ibc
+cp scripts/notify_2fa_watch.sh scripts/notify_2fa_needed.sh \
+   scripts/notify_gateway_down.sh scripts/notify_weekly_reauth.sh ~/ibc/
+
+# 4. (Optional) Install systemd units and trading-week timers
 mkdir -p ~/.config/systemd/user
-sed -i "s|/home/USER|$HOME|g" systemd/*.service
-cp systemd/*.service ~/.config/systemd/user/
+sed -i "s|/home/USER|$HOME|g" systemd/*.service systemd/*.timer
+cp systemd/*.service systemd/*.timer ~/.config/systemd/user/
+# ibgateway.service only runs while this flag exists (see below).
+touch ~/ibc/.trading-week
 systemctl --user daemon-reload
-systemctl --user enable --now ibgateway.service ibc-2fa-notify.service
+systemctl --user enable --now ibgateway.service ibc-2fa-notify.service \
+  ibc-weekly-reauth.timer ibgw-stop.timer
 
 # 5. (Optional, for 24/7) Enable lingering
 sudo loginctl enable-linger $USER
@@ -135,6 +147,36 @@ verify_after_auth.py
 # ✅ ALL CHECKS PASSED — IB Gateway API is live and serving
 ```
 
+## Trading-week lifecycle
+
+IBKR invalidates the session on the Saturday-night server reset, and there is
+nothing useful to trade over the weekend — so `ibgateway.service` is gated on
+`ConditionPathExists=~/ibc/.trading-week`. A weekend reboot therefore cannot
+bring the gateway back up to hammer IBKR for a login nobody can approve. Two
+timers own the flag:
+
+| Timer | When | Effect |
+|---|---|---|
+| `ibc-weekly-reauth.timer` | Sun 12:00, `Persistent=true` | Creates `~/ibc/.trading-week`, starts the gateway, and Telegram-prompts for the week's 2FA approval |
+| `ibgw-stop.timer` | Fri 20:00, `Persistent=false` | Stops the gateway, then removes the flag |
+
+In between, the gateway's own daily re-authentication keeps the session alive.
+If a start ever exhausts its budget, `OnFailure=ibc-gateway-down-notify.service`
+sends one "gave up, needs a human" Telegram alert instead of the unit retrying
+forever in silence.
+
+Retry bounds live in `[Unit]`, not `[Service]`:
+
+```ini
+[Unit]
+StartLimitIntervalSec=3600
+StartLimitBurst=4
+```
+
+systemd >= 230 **silently ignores** those two keys in `[Service]` — a gateway
+configured that way retries at the systemd default of 10 s / 5 attempts
+instead of the intended 1 h / 4 attempts.
+
 ## Files
 
 | Path | Purpose |
@@ -145,11 +187,18 @@ verify_after_auth.py
 | `scripts/probe_handshake.py` | single-shot handshake probe |
 | `scripts/diag_api.py` | verbose event-listener diagnostic |
 | `scripts/enable_api.sh` | drives IBC's ENABLEAPI task (TWS only) |
-| `scripts/notify_2fa_watch.sh` | tails IBC log, fires on SMS dialog |
-| `scripts/notify_2fa_needed.sh` | sends the Telegram ping |
+| `scripts/notify_2fa_watch.sh` | tails IBC log, fires on any 2FA prompt |
+| `scripts/notify_2fa_needed.sh` | sends the 2FA Telegram ping |
+| `scripts/notify_gateway_down.sh` | "gateway gave up" Telegram alert |
+| `scripts/notify_weekly_reauth.sh` | Sunday trading-week start + re-auth prompt |
 | `scripts/commandsend.sh` | patched IBC command sender (nc + SECURITY_CODE) |
-| `systemd/ibgateway.service` | Gateway unit (auto-restart, journal logs) |
+| `systemd/ibgateway.service` | Gateway unit (trading-week gated, auto-restart, journal logs) |
 | `systemd/ibc-2fa-notify.service` | 2FA watcher unit |
+| `systemd/ibc-gateway-down-notify.service` | `OnFailure=` alert for the gateway unit |
+| `systemd/ibc-weekly-reauth.service` | Opens the trading week and prompts for re-auth |
+| `systemd/ibc-weekly-reauth.timer` | Sunday 12:00 trigger for the above |
+| `systemd/ibgw-stop.service` | Closes the trading week (stop + remove flag) |
+| `systemd/ibgw-stop.timer` | Friday 20:00 trigger for the above |
 | `examples/config.ini` | IBC config (no creds) |
 | `examples/jts.ini.example` | IB Gateway jts.ini (no creds) |
 | `docs/IBGATEWAY_PORT_REDIRECT.md` | the `cdc1.ibllc.com` redirect |
@@ -182,6 +231,9 @@ with the failing command's output. The most common failure modes:
   script still completes; the notifier is optional.
 - Port 4001 not listening after auth → the network blocks outbound
   to IBKR's CCp gateway. See `docs/IBGATEWAY_PORT_REDIRECT.md`.
+- `ibgateway.service` starts and immediately goes inactive → the
+  trading-week flag is missing. Create it with `touch ~/ibc/.trading-week`,
+  or let `ibc-weekly-reauth.timer` fire on Sunday.
 
 ## Security
 
@@ -191,7 +243,10 @@ with the failing command's output. The most common failure modes:
   password. The `.gitignore` covers this; the install script stages
   it outside the repo.
 - The Telegram bot token and chat ID should also not be committed.
-  The install script reads them from env vars, not files.
+  The install script reads them from env vars, not files. The notifier
+  scripts read them at runtime from
+  `~/.config/ib-gateway-helpers/telegram.env` (or a Hermes profile
+  `.env`) — the path is configurable, the secret is never inlined.
 
 ## License
 

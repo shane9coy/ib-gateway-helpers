@@ -1,0 +1,13 @@
+[Unit]
+Description=Stop IB Gateway Friday 20:00 (no weekend gateway)
+
+[Timer]
+OnCalendar=Fri 20:00
+# Deliberately not persistent: if the box was off at 20:00 there is no gateway
+# running to stop, and firing late on Saturday would be pointless.
+Persistent=false
+AccuracySec=1min
+Unit=ibgw-stop.service
+
+[Install]
+WantedBy=timers.target

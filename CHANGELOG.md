@@ -3,6 +3,55 @@
 All notable changes to this project are documented here. Versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.0] — 2026-09-10
+
+Trading-week lifecycle, and a start-limit fix that was being silently
+ignored by systemd.
+
+### Added
+
+- `systemd/ibc-weekly-reauth.service` + `systemd/ibc-weekly-reauth.timer` —
+  Sunday 12:00 (`Persistent=true`) trading-week start: creates
+  `~/ibc/.trading-week`, starts the gateway, and Telegram-prompts for the
+  weekly IBKR re-auth.
+- `systemd/ibgw-stop.service` + `systemd/ibgw-stop.timer` — Friday 20:00
+  (`Persistent=false`) weekend shutdown: stops the gateway, then removes the
+  flag so nothing restarts it until Sunday.
+- `systemd/ibc-gateway-down-notify.service` — `OnFailure=` handler for
+  `ibgateway.service`; alerts once when the unit exhausts its start budget
+  and stops retrying.
+- `scripts/notify_weekly_reauth.sh` — opens the trading week and reports
+  whether the gateway is already authenticated, waiting on approval, or
+  failed to start.
+- `scripts/notify_gateway_down.sh` — sends the "gave up, needs a human"
+  Telegram alert.
+
+### Changed
+
+- `systemd/ibgateway.service`: gated on
+  `ConditionPathExists=~/ibc/.trading-week`; added
+  `OnFailure=ibc-gateway-down-notify.service`; `Restart=always` with
+  `RestartSec=30s` (was `on-failure` / 300 s).
+- `systemd/ibc-2fa-notify.service`: `PartOf=ibgateway.service`, and
+  `RuntimeMaxSec=15min` so the watcher periodically re-resolves IBC's
+  daily log roll (`ibc-..._<DayOfWeek>.txt`) instead of tailing yesterday's
+  file forever.
+- `scripts/notify_2fa_watch.sh`: now matches the app-auth prompt
+  (`Second Factor Authentication initiated`) as well as the SMS dialog,
+  rate-limits notifications with a cooldown (a retrying gateway can raise a
+  prompt every few seconds), and waits for the day's log to appear rather
+  than exiting when the gateway has not started yet.
+- `install.sh`: installs `*.timer` as well as `*.service`, stages the
+  notifier scripts into `~/ibc/` (the units reference them by absolute
+  path), and opens the trading week before the first start.
+
+### Fixed
+
+- `systemd/ibgateway.service` had `StartLimitIntervalSec`/`StartLimitBurst`
+  in `[Service]`. systemd >= 230 ignores both keys there, so the intended
+  4-starts-per-hour bound silently degraded to systemd's 10 s default.
+  Moved them to `[Unit]`.
+
 ## [0.1.0] — 2026-09-08
 
 Initial public release.

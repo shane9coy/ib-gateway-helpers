@@ -1,12 +1,16 @@
 [Unit]
-Description=Watch IB Gateway log and Telegram-notify on 2FA prompt
-After=ibgateway.service
+Description=Watch IB Gateway log and Telegram-notify on a second-factor prompt
+PartOf=ibgateway.service
 
 [Service]
 Type=simple
 ExecStart=/home/USER/ibc/notify_2fa_watch.sh
 Restart=always
 RestartSec=10
+# IBC rolls its log daily (ibc-..._<DayOfWeek>.txt) and the watcher resolves the
+# path once at startup, so recycle it regularly to re-resolve onto the current
+# day's file. Without this it keeps tailing yesterday's log and goes silent.
+RuntimeMaxSec=15min
 
 [Install]
 WantedBy=default.target

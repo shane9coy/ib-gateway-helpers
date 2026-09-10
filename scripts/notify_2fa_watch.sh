@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
-# Watch the IBC log for 2FA prompts and send a Telegram ping (dedup'd to once per prompt).
-# Run as a background process; tail -F on the latest log file.
-
+# Watch the IBC log for a live second-factor prompt and send a Telegram ping.
+#
+# IB Gateway uses one dialog for both factors:
+#   app auth -> "Second Factor Authentication initiated"
+#   SMS      -> "Enter SMS Authentication Code; event=Opened"
+# Either line means IBKR is waiting on you right now.
+#
+# A gateway that is retrying can open a prompt every few seconds, so
+# notifications are rate-limited by a cooldown rather than once-per-log.
 set -uo pipefail
 
 # ── Configuration ────────────────────────────────────────────────────────────
@@ -18,11 +24,10 @@ for f in "${ENV_FILE_CANDIDATES[@]}"; do
   fi
 done
 ENV_FILE="${ENV_FILE:-${ENV_FILE_CANDIDATES[0]}}"
-
 LOG_DIR="${IBGW_LOG_DIR:-$HOME/ibc/logs}"
 NOTIFY_BIN="${IBGW_NOTIFY_BIN:-$HOME/ibc/notify_2fa_needed.sh}"
 LOG_PATTERN="${IBGW_LOG_PATTERN:-ibc-*_GATEWAY-*_*.txt}"
-
+COOLDOWN="${IBGW_NOTIFY_COOLDOWN:-120}"
 # load telegram creds (skip lines starting with * or #)
 if [[ -f "$ENV_FILE" ]]; then
   while IFS= read -r line; do
@@ -33,28 +38,29 @@ if [[ -f "$ENV_FILE" ]]; then
   done < "$ENV_FILE"
 fi
 
-# Find the most recent gateway log file
+# Path of the most recent gateway log, empty while the gateway has not started.
 get_log() {
   ls -t "${LOG_DIR}"/${LOG_PATTERN} 2>/dev/null | head -1
 }
-
-last_notified=""
-LOG="$(get_log)"
-if [[ -z "$LOG" ]]; then
-  echo "no log file yet, retrying in 30s"
-  sleep 30
+LOG=""
+while [[ -z "$LOG" ]]; do
   LOG="$(get_log)"
-fi
+  [[ -n "$LOG" ]] && break
+  echo "no gateway log in $LOG_DIR yet, retrying in 30s"
+  sleep 30
+done
+echo "watching $LOG (cooldown ${COOLDOWN}s)"
 
-if [[ -n "$LOG" ]]; then
-  echo "watching $LOG"
-  tail -F -n 0 "$LOG" | while read -r line; do
-    if [[ "$line" == *"Enter SMS Authentication Code; event=Opened"* ]]; then
-      sig="${LOG}:$(date +%s | cut -c1-8)"
-      if [[ "$sig" != "$last_notified" ]]; then
-        last_notified="$sig"
+last_notified=0
+tail -F -n 0 "$LOG" | while read -r line; do
+  case "$line" in
+    *"Second Factor Authentication initiated"*|*"Enter SMS Authentication Code; event=Opened"*)
+      now=$(date +%s)
+      if (( now - last_notified >= COOLDOWN )); then
+        last_notified=$now
+        echo "$(date -Is) second-factor prompt open, notifying"
         "$NOTIFY_BIN" &
       fi
-    fi
-  done
-fi
+      ;;
+  esac
+done

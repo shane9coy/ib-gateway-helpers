@@ -1,8 +1,21 @@
 [Unit]
-Description=Interactive Brokers Gateway (paper) via IBC + Xvfb
+Description=Interactive Brokers Gateway (trading week; daily autorestart keeps the session)
 Documentation=https://github.com/IbcAlpha/IBC
 After=network-online.target nss-lookup.target
 Wants=network-online.target
+# Only run inside the trading week. The flag is created by ibc-weekly-reauth
+# (Sunday) and removed by ibgw-stop (Friday), so a reboot on the weekend does
+# not bring the gateway back up to hammer IBKR for a login nobody can approve.
+ConditionPathExists=/home/USER/ibc/.trading-week
+# Bound the auth-retry storm. An unauthenticated gateway cannot serve the API,
+# so after a few failed starts stop hammering IBKR and wait for a human.
+# These belong in [Unit] for systemd >= 230 - the previous [Service] placement
+# was silently ignored (systemd 257 reported the 10s default).
+StartLimitIntervalSec=3600
+StartLimitBurst=4
+# OnFailure fires once the start budget above is exhausted, i.e. the unit has
+# given up retrying and is waiting for a human to reset-failed + start it.
+OnFailure=ibc-gateway-down-notify.service
 
 [Service]
 Type=simple
@@ -20,13 +33,15 @@ Environment="TWS_PATH=/opt/ibgateway"
 Environment="TWS_SETTINGS_PATH=/opt/ibgateway"
 Environment="IBC_INI=/home/USER/ibc/config.ini"
 Environment="LOG_PATH=/home/USER/ibc/logs"
-Environment="TWOFA_TIMEOUT_ACTION=exit"
 Environment="DISPLAY=:99"
+# On 2FA timeout, exit cleanly instead of IBC re-logging in inside its own
+# process. Without this the restart loop never reaches systemd, so the
+# StartLimit* bound above cannot do its job. See ibcstart.sh: on
+# E_2FA_DIALOG_TIMED_OUT it breaks unless the action is RESTART.
+Environment="TWOFA_TIMEOUT_ACTION=exit"
 ExecStart=/home/USER/ibc/run_xvfb_gateway.sh
-Restart=on-failure
-RestartSec=300
-StartLimitBurst=4
-StartLimitIntervalSec=3600
+Restart=always
+RestartSec=30s
 StandardOutput=append:/home/USER/ibc/logs/ibc.log
 StandardError=append:/home/USER/ibc/logs/ibc.log
 TimeoutStartSec=300

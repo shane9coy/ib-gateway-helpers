@@ -1,0 +1,10 @@
+[Unit]
+Description=Close the trading week and stop IB Gateway for the weekend
+
+[Service]
+Type=oneshot
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# Stop first, then remove the flag: the gateway must not come back up if
+# anything restarts it in the gap.
+ExecStart=/usr/bin/systemctl --user stop ibgateway.service
+ExecStartPost=/usr/bin/rm -f /home/USER/ibc/.trading-week

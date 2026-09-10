@@ -1,0 +1,12 @@
+[Unit]
+Description=Sunday noon reminder for the weekly IBKR re-auth
+
+[Timer]
+OnCalendar=Sun 12:00
+# If the box was off at noon, fire on the next boot instead of skipping the week.
+Persistent=true
+AccuracySec=1min
+Unit=ibc-weekly-reauth.service
+
+[Install]
+WantedBy=timers.target
