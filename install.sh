@@ -14,7 +14,7 @@
 
 set -uo pipefail
 
-REPO_URL="https://github.com/REDACTED/ib-gateway-helpers.git"
+REPO_URL="https://github.com/shane9coy/ib-gateway-helpers.git"
 INSTALL_DIR="${IBGW_INSTALL_DIR:-/opt/ib-gateway-helpers}"
 USER_HOME="${HOME:-/root}"
 USER_NAME="${USER:-$(id -un 2>/dev/null || echo root)}"
