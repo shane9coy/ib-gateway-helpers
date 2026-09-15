@@ -55,7 +55,7 @@ sandbox, fresh container), set these env vars and the install script
 will skip the interactive prompts:
 
 ```bash
-export IBGW_USERNAME='REDACTED'
+export IBGW_USERNAME='...'
 export IBGW_PASSWORD='...'
 export IBGW_MODE='live'                  # or 'paper'
 export IBGW_TELEGRAM_BOT_TOKEN='...'     # optional
